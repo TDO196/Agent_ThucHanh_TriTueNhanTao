@@ -21,6 +21,8 @@ MOVES = [
 
 SPEED = 600
 MAX_NODES = 500
+MAX_NODES_IDS = 2000
+MAX_DEPTH_IDS = 30
 
 
 class Node:
@@ -132,12 +134,16 @@ class PuzzleApp:
         self.btn_bfs_e = self.make_button(self.left, "BFS  - Early Goal Test", lambda: self.select_algo("bfs-e"), self.accent3)
         self.btn_dfs = self.make_button(self.left, "DFS  - Late Goal Test", lambda: self.select_algo("dfs"), self.accent2)
         self.btn_dfs_e = self.make_button(self.left, "DFS  - Early Goal Test", lambda: self.select_algo("dfs-e"), self.accent3)
+        self.btn_ids = self.make_button(self.left, "IDS  - Late Goal Test", lambda: self.select_algo("ids"), self.accent)
+        self.btn_ids_e = self.make_button(self.left, "IDS  - Early Goal Test", lambda: self.select_algo("ids-e"), self.accent3)
 
         self.algo_buttons = {
-            "bfs": self.btn_bfs,
+            "bfs":   self.btn_bfs,
             "bfs-e": self.btn_bfs_e,
-            "dfs": self.btn_dfs,
+            "dfs":   self.btn_dfs,
             "dfs-e": self.btn_dfs_e,
+            "ids":   self.btn_ids,
+            "ids-e": self.btn_ids_e,
         }
 
         self.section_title(self.left, "Điều khiển")
@@ -528,6 +534,9 @@ class PuzzleApp:
 
 
     def build_steps(self, algo, start, goal):
+        if algo.startswith("ids"):
+            return self.build_steps_ids(algo, start, goal)
+
         goal_key = self.state_key(goal)
         steps = []
         is_early = algo.endswith("-e")
@@ -638,6 +647,176 @@ class PuzzleApp:
         })
         return steps
 
+    def build_steps_ids(self, algo, start, goal):
+        """
+        IDS = lặp DFS có giới hạn độ sâu tăng dần từ 0 đến MAX_DEPTH_IDS.
+
+        Mỗi lần lặp:
+          - Bước "iter": xóa canvas, reset card, vẽ lại S0 từ đầu.
+          - Chạy DLS (Depth-Limited Search) bằng stack.
+          - Dùng visited riêng cho từng lần lặp (tránh chu trình trong lần đó).
+
+        Late  (ids):   kiểm tra goal khi lấy node ra khỏi stack.
+        Early (ids-e): kiểm tra goal ngay khi sinh node con.
+        """
+        is_early  = algo.endswith("-e")
+        goal_key  = self.state_key(goal)
+        start_key = self.state_key(start)
+        steps     = []
+
+        # ── Bước 0: khởi tạo — bị prepare() bỏ qua (step_index=1),
+        #    chỉ dùng để log dòng đầu tiên qua prepare().
+        algo_name = "IDS - " + ("Early" if is_early else "Late") + " Goal Test"
+        steps.append({
+            "type":  "expand",
+            "state": start,
+            "label": "S0",
+            "log":   f"Khởi tạo {algo_name}. Đưa START (S0) vào stack.",
+        })
+
+        # Early: kiểm tra ngay trạng thái đầu
+        if is_early and start_key == goal_key:
+            steps.append({
+                "type":  "goal",
+                "state": start,
+                "label": "GOAL!",
+                "path":  [{"state": start, "move": "START"}],
+                "log":   "START chính là GOAL.",
+            })
+            return steps
+
+        total_expanded = 0
+
+        for depth_limit in range(MAX_DEPTH_IDS + 1):
+
+            # ── Tiêu đề lần lặp: xóa canvas, vẽ lại S0 ──────────────────
+            steps.append({
+                "type":        "iter",
+                "state":       start,
+                "depth_limit": depth_limit,
+                "log":         f"── Lặp IDS #{depth_limit}: giới hạn độ sâu = {depth_limit} ──",
+            })
+
+            start_node = Node(start, None, 0, "START")
+            stack      = [start_node]
+            visited    = {start_key}
+            label_map  = {start_key: "S0"}
+            exp_count  = 0
+
+            while stack:
+                if total_expanded >= MAX_NODES_IDS:
+                    steps.append({
+                        "type": "fail",
+                        "log":  f"✗ Đã xét {total_expanded} node, vượt giới hạn {MAX_NODES_IDS}. Dừng.",
+                    })
+                    return steps
+
+                node = stack.pop()
+                exp_count     += 1
+                total_expanded += 1
+                node_key   = self.state_key(node.state)
+                node_label = label_map.get(node_key, f"N{exp_count}")
+
+                steps.append({
+                    "type":  "expand",
+                    "state": node.state,
+                    "label": node_label,
+                    "log":   f"Xét {node_label} {node.state} - Độ sâu {node.depth}/{depth_limit}.",
+                })
+
+                # ── Late Goal Test ────────────────────────────────────────
+                if not is_early and node_key == goal_key:
+                    path = self.get_path(node)
+                    steps.append({
+                        "type":  "goal",
+                        "state": node.state,
+                        "label": node_label + " = GOAL",
+                        "path":  path,
+                        "log":   (
+                            f"✓ Tìm thấy GOAL = {node_label}. "
+                            f"Độ sâu: {node.depth} (lặp #{depth_limit}). "
+                            f"Tổng node đã xét: {total_expanded}."
+                        ),
+                    })
+                    return steps
+
+                # Cắt tỉa: đạt giới hạn độ sâud
+                if node.depth >= depth_limit:
+                    steps.append({
+                        "type":  "dup",
+                        "state": node.state,
+                        "label": "✂",
+                        "log":   f"  Độ sâu {node.depth} đạt giới hạn {depth_limit}.",
+                    })
+                    continue
+
+                # ── Sinh node con ─────────────────────────────────────────
+                children = self.get_children(node.state)
+                for child in children:
+                    ck = self.state_key(child["state"])
+                    changed = [i for i, v in enumerate(child["state"]) if v != node.state[i]]
+
+                    # Early Goal Test: kiểm tra ngay khi sinh ra
+                    if is_early and ck == goal_key:
+                        child_label = self.next_node_label()
+                        label_map[ck] = child_label
+                        child_node = Node(child["state"], node, node.depth + 1, child["move"])
+                        path = self.get_path(child_node)
+
+                        steps.append({
+                            "type":    "gen",
+                            "state":   child["state"],
+                            "label":   child_label,
+                            "changed": changed,
+                            "log":     f"  Sinh {child_label} {child['state']} ({child['icon']}) → stack.",
+                        })
+                        steps.append({
+                            "type":    "goal",
+                            "state":   child["state"],
+                            "label":   child_label + " = GOAL!",
+                            "changed": changed,
+                            "path":    path,
+                            "log":     (
+                                f"✓ Sinh ra GOAL = {child_label} ({child['icon']}). "
+                                f"Độ sâu: {node.depth + 1} (lặp #{depth_limit}). "
+                                f"Tổng node đã xét: {total_expanded}."
+                            ),
+                        })
+                        return steps
+
+                    if ck in visited:
+                        dup_label = label_map.get(ck, "?")
+                        steps.append({
+                            "type":    "dup",
+                            "state":   child["state"],
+                            "label":   "Dup",
+                            "changed": changed,
+                            "log":     f"  Sinh {child['state']} ({child['icon']}) - TRÙNG với {dup_label}, bỏ qua.",
+                        })
+                    else:
+                        child_label = self.next_node_label()
+                        label_map[ck] = child_label
+                        visited.add(ck)
+                        child_node = Node(child["state"], node, node.depth + 1, child["move"])
+                        stack.append(child_node)
+
+                        steps.append({
+                            "type":    "gen",
+                            "state":   child["state"],
+                            "label":   child_label,
+                            "changed": changed,
+                            "log":     f"  Sinh {child_label} {child['state']} ({child['icon']}) → stack.",
+                        })
+
+        steps.append({
+            "type": "fail",
+            "log":  (
+                f"✗ Không tìm thấy lời giải sau khi thử đến độ sâu {MAX_DEPTH_IDS}. "
+                f"Tổng node đã xét: {total_expanded}."
+            ),
+        })
+        return steps
+
    
     # CONTROL
 
@@ -656,10 +835,12 @@ class PuzzleApp:
                 btn.config(bg=self.tile_bg)
 
         names = {
-            "bfs": "BFS - Late Goal Test",
+            "bfs":   "BFS - Late Goal Test",
             "bfs-e": "BFS - Early Goal Test",
-            "dfs": "DFS - Late Goal Test",
+            "dfs":   "DFS - Late Goal Test",
             "dfs-e": "DFS - Early Goal Test",
+            "ids":   "IDS - Late Goal Test",
+            "ids-e": "IDS - Early Goal Test",
         }
         self.vis_title.config(text=names[name].upper())
         self.btn_auto.config(state="normal")
@@ -671,7 +852,7 @@ class PuzzleApp:
             return False
 
         if not self.selected_algo:
-            messagebox.showwarning("Thiếu thuật toán", "Bạn hãy chọn BFS hoặc DFS trước.")
+            messagebox.showwarning("Thiếu thuật toán", "Bạn hãy chọn BFS, DFS hoặc IDS trước.")
             return False
 
         start = self.read_grid(self.start_vars)
@@ -711,7 +892,13 @@ class PuzzleApp:
 
         step_type = step["type"]
 
-        if step_type == "expand":
+        if step_type == "iter":
+            # Xóa canvas, reset card list, vẽ lại S0 cho lần lặp IDS mới
+            self.canvas.delete("all")
+            self.rendered_cards = []
+            self.node_label_counter = 0
+            self.render_state_card(step["state"], "S0", "current", [])
+        elif step_type == "expand":
             self.render_state_card(step["state"], step["label"], "current", [])
         elif step_type == "gen":
             self.render_state_card(step["state"], step["label"], "normal", step.get("changed", []))

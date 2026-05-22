@@ -19,6 +19,7 @@ ROWS = 5
 COLS = 5
 SPEED = 600
 MAX_STATES = 3000
+MAX_DEPTH_IDS = 50
 
 MOVES = [
     ("Lên", -1, 0, "↑"),
@@ -40,7 +41,7 @@ class Node:
 class VacuumApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("Mô phỏng máy hút bụi - BFS/DFS")
+        self.root.title("Mô phỏng máy hút bụi - BFS/DFS/IDS")
         self.root.geometry("1050x680")
         self.root.minsize(850, 560)
 
@@ -147,12 +148,16 @@ class VacuumApp:
         self.btn_bfs_e = self.make_button(self.left, "BFS - Early Goal Test", lambda: self.select_algo("bfs-e"), self.accent3)
         self.btn_dfs = self.make_button(self.left, "DFS - Late Goal Test", lambda: self.select_algo("dfs"), self.accent2)
         self.btn_dfs_e = self.make_button(self.left, "DFS - Early Goal Test", lambda: self.select_algo("dfs-e"), self.accent3)
+        self.btn_ids = self.make_button(self.left, "IDS - Late Goal Test", lambda: self.select_algo("ids"), self.accent)
+        self.btn_ids_e = self.make_button(self.left, "IDS - Early Goal Test", lambda: self.select_algo("ids-e"), self.accent3)
 
         self.algo_buttons = {
             "bfs": self.btn_bfs,
             "bfs-e": self.btn_bfs_e,
             "dfs": self.btn_dfs,
             "dfs-e": self.btn_dfs_e,
+            "ids": self.btn_ids,
+            "ids-e": self.btn_ids_e,
         }
 
         self.section_title(self.left, "Điều khiển")
@@ -165,7 +170,7 @@ class VacuumApp:
 
         tk.Label(
             self.left,
-            text="Quy ước:\n0 = sạch\n1 = bụi\n2 = nội thất/vật cản\n\nLate: kiểm tra khi lấy ra xét.\nEarly: kiểm tra khi sinh ra.\nMục tiêu: hút hết bụi.",
+            text="Quy ước:\n0 = sạch\n1 = bụi\n2 = nội thất/vật cản\n\nLate: kiểm tra khi lấy ra xét.\nEarly: kiểm tra khi sinh ra.\nMục tiêu: hút hết bụi.\n\nIDS tăng dần giới hạn\nđộ sâu từ 0 → MAX.",
             bg=self.panel,
             fg=self.muted,
             justify="left",
@@ -427,6 +432,9 @@ class VacuumApp:
 
 
     def build_steps(self, algo, start_grid, start_pos):
+        if algo.startswith("ids"):
+            return self.build_steps_ids(algo, start_grid, start_pos)
+
         steps = []
 
         is_early = algo.endswith("-e")
@@ -519,6 +527,168 @@ class VacuumApp:
             "type": "fail",
             "node": None,
             "log": "✗ Không tìm thấy cách hút sạch bụi trong giới hạn trạng thái.",
+        })
+        return steps
+
+    def build_steps_ids(self, algo, start_grid, start_pos):
+        """
+        Iterative Deepening Search (IDS):
+        - Chạy DFS có giới hạn độ sâu, tăng dần từ 0 đến MAX_DEPTH_IDS.
+        - Mỗi lần lặp: khởi tạo lại visited để tránh chu trình trong lần lặp đó.
+        - Late  (ids):   kiểm tra goal khi lấy node ra xét.
+        - Early (ids-e): kiểm tra goal ngay khi sinh node con ra.
+        """
+        steps = []
+        is_early = algo.endswith("-e")
+        algo_name = "IDS" + (" - Early Goal Test" if is_early else " - Late Goal Test")
+
+        start_node = Node(start_grid, start_pos, None, "START", 0)
+
+        steps.append({
+            "type": "start",
+            "node": start_node,
+            "log": (
+                f"Khởi tạo {algo_name}. "
+                f"Máy hút bụi tại {start_pos}. "
+                f"Số ô bụi: {self.count_dirty(start_grid)}."
+            ),
+        })
+
+        # Early Goal Test: kiểm tra ngay trạng thái đầu
+        if is_early and self.count_dirty(start_grid) == 0:
+            steps.append({
+                "type": "goal",
+                "node": start_node,
+                "path": [start_node],
+                "log": "✓ START đã là trạng thái mục tiêu vì không còn bụi.",
+            })
+            return steps
+
+        total_expanded = 0
+
+        for depth_limit in range(MAX_DEPTH_IDS + 1):
+
+            # ── Tiêu đề lần lặp ──────────────────────────────────────────
+            steps.append({
+                "type": "iter",
+                "node": start_node,
+                "log": f"── Lặp IDS #{depth_limit}: giới hạn độ sâu = {depth_limit} ──",
+            })
+
+            # Mỗi lần lặp khởi tạo lại stack và visited
+            stack = [start_node]
+            visited = {self.state_key(start_grid, start_pos)}
+
+            while stack:
+                if total_expanded >= MAX_STATES:
+                    steps.append({
+                        "type": "fail",
+                        "node": None,
+                        "log": f"✗ Đã vượt giới hạn {MAX_STATES} trạng thái. Dừng.",
+                    })
+                    return steps
+
+                node = stack.pop()
+                total_expanded += 1
+                dirty_left = self.count_dirty(node.grid)
+
+                steps.append({
+                    "type": "visit",
+                    "node": node,
+                    "log": (
+                        f"  Xét: độ sâu {node.depth}/{depth_limit}, "
+                        f"vị trí {node.pos}, còn {dirty_left} ô bụi."
+                    ),
+                })
+
+                # ── Late Goal Test ────────────────────────────────────────
+                if not is_early and dirty_left == 0:
+                    path = self.get_path(node)
+                    steps.append({
+                        "type": "goal",
+                        "node": node,
+                        "path": path,
+                        "log": (
+                            f"✓ Tìm thấy! Late Goal Test tại độ sâu {node.depth} "
+                            f"(lần lặp #{depth_limit}). "
+                            f"{len(path)-1} hành động. "
+                            f"Tổng node đã xét: {total_expanded}."
+                        ),
+                    })
+                    return steps
+
+                # Cắt tỉa nếu đạt giới hạn độ sâu
+                if node.depth >= depth_limit:
+                    steps.append({
+                        "type": "dup",
+                        "node": node,
+                        "log": (
+                            f"    Độ sâu {node.depth} "
+                            f"đã đạt giới hạn {depth_limit}."
+                        ),
+                    })
+                    continue
+
+                # Sinh node con
+                for child in self.get_children(node):
+                    key = self.state_key(child.grid, child.pos)
+
+                    if key in visited:
+                        steps.append({
+                            "type": "dup",
+                            "node": child,
+                            "log": (
+                                f"    Bỏ qua trùng: {child.action}, "
+                                f"vị trí {child.pos}."
+                            ),
+                        })
+                        continue
+
+                    visited.add(key)
+
+                    # ── Early Goal Test ───────────────────────────────────
+                    if is_early and self.count_dirty(child.grid) == 0:
+                        path = self.get_path(child)
+                        steps.append({
+                            "type": "gen",
+                            "node": child,
+                            "log": (
+                                f"    Sinh: {child.action}, "
+                                f"vị trí {child.pos}, còn 0 ô bụi."
+                            ),
+                        })
+                        steps.append({
+                            "type": "goal",
+                            "node": child,
+                            "path": path,
+                            "log": (
+                                f"✓ Tìm thấy! Early Goal Test tại độ sâu {child.depth} "
+                                f"(lần lặp #{depth_limit}). "
+                                f"{len(path)-1} hành động. "
+                                f"Tổng node đã xét: {total_expanded}."
+                            ),
+                        })
+                        return steps
+
+                    # Cho vào stack để xét sau
+                    stack.append(child)
+                    steps.append({
+                        "type": "gen",
+                        "node": child,
+                        "log": (
+                            f"    Sinh: {child.action}, "
+                            f"vị trí {child.pos}, "
+                            f"còn {self.count_dirty(child.grid)} ô bụi."
+                        ),
+                    })
+
+        steps.append({
+            "type": "fail",
+            "node": None,
+            "log": (
+                f"✗ Không tìm thấy sau khi thử đến độ sâu {MAX_DEPTH_IDS}. "
+                f"Tổng node đã xét: {total_expanded}."
+            ),
         })
         return steps
 
@@ -678,6 +848,8 @@ class VacuumApp:
             "bfs-e": "BFS - Early Goal Test",
             "dfs": "DFS - Late Goal Test",
             "dfs-e": "DFS - Early Goal Test",
+            "ids": "IDS - Late Goal Test",
+            "ids-e": "IDS - Early Goal Test",
         }
         display_name = names[name]
         self.vis_title.config(text=display_name.upper())
@@ -730,7 +902,7 @@ class VacuumApp:
         if step_type in ("start", "visit", "gen"):
             node = step["node"]
             self.draw_grid(node.grid, node.pos, f"{step_type.upper()} - {node.action}")
-        elif step_type == "dup":
+        elif step_type in ("dup", "iter"):
             pass
         elif step_type == "goal":
             node = step["node"]
