@@ -8,6 +8,7 @@ import tkinter as tk
 from tkinter import messagebox
 from collections import deque
 import copy
+import heapq
 
 
 # VACUUM CLEANER VISUALIZER - TKINTER
@@ -41,7 +42,7 @@ class Node:
 class VacuumApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("Mô phỏng máy hút bụi - BFS/DFS/IDS")
+        self.root.title("Mô phỏng máy hút bụi - BFS/DFS/IDS/UCS/A*/Greedy")
         self.root.geometry("1050x680")
         self.root.minsize(850, 560)
 
@@ -150,14 +151,30 @@ class VacuumApp:
         self.btn_dfs_e = self.make_button(self.left, "DFS - Early Goal Test", lambda: self.select_algo("dfs-e"), self.accent3)
         self.btn_ids = self.make_button(self.left, "IDS - Late Goal Test", lambda: self.select_algo("ids"), self.accent)
         self.btn_ids_e = self.make_button(self.left, "IDS - Early Goal Test", lambda: self.select_algo("ids-e"), self.accent3)
+        self.btn_ucs = self.make_button(self.left, "UCS", lambda: self.select_algo("ucs"), self.accent)
+        self.btn_astar = self.make_button(self.left, "A* Search", lambda: self.select_algo("astar"), self.accent2)
+        self.btn_greedy = self.make_button(self.left, "Greedy Best-First", lambda: self.select_algo("greedy"), self.accent4)
+        self.btn_idastar = self.make_button(self.left, "IDA* Search", lambda: self.select_algo("idastar"), self.accent2)
+        self.btn_hc_simple = self.make_button(self.left, "HC - Leo dốc đơn giản", lambda: self.select_algo("hc_simple"), self.accent4)
+        self.btn_hc_random = self.make_button(self.left, "HC - Leo dốc ngẫu nhiên", lambda: self.select_algo("hc_random"), self.accent4)
+        self.btn_hc_steepest = self.make_button(self.left, "HC - Dốc nhất", lambda: self.select_algo("hc_steepest"), self.accent4)
+        self.btn_lbs = self.make_button(self.left, "Local Beam Search", lambda: self.select_algo("local_beam"), self.accent4)
 
         self.algo_buttons = {
-            "bfs": self.btn_bfs,
-            "bfs-e": self.btn_bfs_e,
-            "dfs": self.btn_dfs,
-            "dfs-e": self.btn_dfs_e,
-            "ids": self.btn_ids,
-            "ids-e": self.btn_ids_e,
+            "bfs":         self.btn_bfs,
+            "bfs-e":       self.btn_bfs_e,
+            "dfs":         self.btn_dfs,
+            "dfs-e":       self.btn_dfs_e,
+            "ids":         self.btn_ids,
+            "ids-e":       self.btn_ids_e,
+            "ucs":         self.btn_ucs,
+            "astar":       self.btn_astar,
+            "greedy":      self.btn_greedy,
+            "idastar":     self.btn_idastar,
+            "hc_simple":   self.btn_hc_simple,
+            "hc_random":   self.btn_hc_random,
+            "hc_steepest": self.btn_hc_steepest,
+            "local_beam":  self.btn_lbs,
         }
 
         self.section_title(self.left, "Điều khiển")
@@ -170,7 +187,7 @@ class VacuumApp:
 
         tk.Label(
             self.left,
-            text="Quy ước:\n0 = sạch\n1 = bụi\n2 = nội thất/vật cản\n\nLate: kiểm tra khi lấy ra xét.\nEarly: kiểm tra khi sinh ra.\nMục tiêu: hút hết bụi.\n\nIDS tăng dần giới hạn\nđộ sâu từ 0 → MAX.",
+            text="Quy ước:\n0 = sạch\n1 = bụi\n2 = nội thất/vật cản\n\nLate: kiểm tra khi lấy ra xét.\nEarly: kiểm tra khi sinh ra.\nMục tiêu: hút hết bụi.\n\nIDS tăng dần giới hạn\nđộ sâu từ 0 → MAX.\n\nUCS: ưu tiên chi phí thấp\n(sinh hết, chọn min g).\nA*: f = g + h\nh = số ô bụi còn lại.\nGreedy: f = h (không\nđảm bảo tối ưu).",
             bg=self.panel,
             fg=self.muted,
             justify="left",
@@ -434,6 +451,22 @@ class VacuumApp:
     def build_steps(self, algo, start_grid, start_pos):
         if algo.startswith("ids"):
             return self.build_steps_ids(algo, start_grid, start_pos)
+        if algo == "ucs":
+            return self.build_steps_ucs(start_grid, start_pos)
+        if algo == "astar":
+            return self.build_steps_astar(start_grid, start_pos)
+        if algo == "greedy":
+            return self.build_steps_greedy(start_grid, start_pos)
+        if algo == "idastar":
+            return self.build_steps_idastar(start_grid, start_pos)
+        if algo == "hc_simple":
+            return self.build_steps_hc_simple(start_grid, start_pos)
+        if algo == "hc_random":
+            return self.build_steps_hc_random(start_grid, start_pos)
+        if algo == "hc_steepest":
+            return self.build_steps_hc_steepest(start_grid, start_pos)
+        if algo == "local_beam":
+            return self.build_steps_local_beam(start_grid, start_pos)
 
         steps = []
 
@@ -692,8 +725,729 @@ class VacuumApp:
         })
         return steps
 
-  
-    # RENDER
+    # ===========================
+    # HEURISTIC
+    # ===========================
+
+    def heuristic_vacuum(self, grid):
+        """
+        Heuristic admissible: số ô bụi còn lại.
+        Mỗi ô bụi cần ít nhất 1 hành động 'Hút bụi' → không bao giờ đánh giá cao hơn thực tế.
+        Consistent: di chuyển không đổi h; hút bụi giảm h đúng 1 = chi phí hành động.
+        """
+        return self.count_dirty(grid)
+
+    # ===========================
+    # UCS
+    # ===========================
+
+    def build_steps_ucs(self, start_grid, start_pos):
+        """
+        UCS - Uniform Cost Search:
+        - Dùng priority queue theo g (chi phí thực, mỗi hành động = 1).
+        - Sinh hết node con rồi đưa vào hàng đợi, sau đó chọn node có g nhỏ nhất.
+        - Chỉ Late Goal Test (đảm bảo đường đi tối ưu).
+        - Closed set: một trạng thái chỉ xét 1 lần (lần đầu pop = chi phí tối ưu).
+        """
+        steps = []
+        start_node = Node(start_grid, start_pos, None, "START", 0)
+        counter = 0
+        heap = [(0, counter, start_node)]
+        visited = set()
+
+        steps.append({
+            "type": "start",
+            "node": start_node,
+            "log": (
+                f"Khởi tạo UCS. Máy hút bụi tại {start_pos}. "
+                f"Số ô bụi: {self.count_dirty(start_grid)}. "
+                f"Đưa START vào hàng đợi ưu tiên (g=0)."
+            ),
+        })
+
+        expanded = 0
+        while heap and expanded < MAX_STATES:
+            g, _, node = heapq.heappop(heap)
+            key = self.state_key(node.grid, node.pos)
+
+            if key in visited:
+                continue
+            visited.add(key)
+            expanded += 1
+
+            dirty_left = self.count_dirty(node.grid)
+
+            steps.append({
+                "type": "visit",
+                "node": node,
+                "log": f"Xét: g={g}, vị trí {node.pos}, còn {dirty_left} ô bụi.",
+            })
+
+            # Late Goal Test
+            if dirty_left == 0:
+                path = self.get_path(node)
+                steps.append({
+                    "type": "goal",
+                    "node": node,
+                    "path": path,
+                    "log": (
+                        f"✓ Hoàn tất! UCS tìm thấy sau {expanded} node. "
+                        f"Chi phí tối ưu g={g}. {len(path)-1} hành động."
+                    ),
+                })
+                return steps
+
+            # Sinh hết node con, đưa tất cả vào hàng đợi ưu tiên
+            for child in self.get_children(node):
+                child_key = self.state_key(child.grid, child.pos)
+                if child_key in visited:
+                    steps.append({
+                        "type": "dup",
+                        "node": child,
+                        "log": f"  Bỏ qua trùng (đã xét tối ưu): {child.action}, vị trí {child.pos}.",
+                    })
+                    continue
+
+                child_g = g + 1
+                counter += 1
+                heapq.heappush(heap, (child_g, counter, child))
+                steps.append({
+                    "type": "gen",
+                    "node": child,
+                    "log": (
+                        f"  Sinh: {child.action}, vị trí {child.pos}, "
+                        f"g={child_g}, còn {self.count_dirty(child.grid)} ô bụi → hàng đợi ưu tiên."
+                    ),
+                })
+
+        steps.append({
+            "type": "fail",
+            "node": None,
+            "log": f"✗ Không tìm thấy sau {expanded} node.",
+        })
+        return steps
+
+    # ===========================
+    # A* SEARCH
+    # ===========================
+
+    def build_steps_astar(self, start_grid, start_pos):
+        """
+        A* Search: f = g + h.
+        - g = chi phí thực (số hành động đã thực hiện).
+        - h = số ô bụi còn lại (admissible + consistent).
+        - Closed set: tối ưu nhờ h consistent.
+        - Late Goal Test.
+        """
+        steps = []
+        start_node = Node(start_grid, start_pos, None, "START", 0)
+        h_start = self.heuristic_vacuum(start_grid)
+        f_start = 0 + h_start
+        counter = 0
+        heap = [(f_start, counter, start_node)]
+        visited = set()
+
+        steps.append({
+            "type": "start",
+            "node": start_node,
+            "log": (
+                f"Khởi tạo A*. Máy hút bụi tại {start_pos}. "
+                f"Số ô bụi: {self.count_dirty(start_grid)}. "
+                f"g=0, h={h_start}, f={f_start}."
+            ),
+        })
+
+        expanded = 0
+        while heap and expanded < MAX_STATES:
+            f, _, node = heapq.heappop(heap)
+            key = self.state_key(node.grid, node.pos)
+
+            if key in visited:
+                continue
+            visited.add(key)
+            expanded += 1
+
+            g = node.depth
+            h = self.heuristic_vacuum(node.grid)
+            dirty_left = self.count_dirty(node.grid)
+
+            steps.append({
+                "type": "visit",
+                "node": node,
+                "log": f"Xét: g={g}, h={h}, f={g+h}, vị trí {node.pos}, còn {dirty_left} ô bụi.",
+            })
+
+            # Late Goal Test
+            if dirty_left == 0:
+                path = self.get_path(node)
+                steps.append({
+                    "type": "goal",
+                    "node": node,
+                    "path": path,
+                    "log": (
+                        f"✓ Hoàn tất! A* tìm thấy sau {expanded} node. "
+                        f"Chi phí tối ưu g={g}. {len(path)-1} hành động."
+                    ),
+                })
+                return steps
+
+            for child in self.get_children(node):
+                child_key = self.state_key(child.grid, child.pos)
+                if child_key in visited:
+                    steps.append({
+                        "type": "dup",
+                        "node": child,
+                        "log": f"  Bỏ qua trùng (đã xét tối ưu): {child.action}, vị trí {child.pos}.",
+                    })
+                    continue
+
+                child_g = g + 1
+                child_h = self.heuristic_vacuum(child.grid)
+                child_f = child_g + child_h
+                counter += 1
+                heapq.heappush(heap, (child_f, counter, child))
+                steps.append({
+                    "type": "gen",
+                    "node": child,
+                    "log": (
+                        f"  Sinh: {child.action}, vị trí {child.pos}, "
+                        f"g={child_g}, h={child_h}, f={child_f}."
+                    ),
+                })
+
+        steps.append({
+            "type": "fail",
+            "node": None,
+            "log": f"✗ Không tìm thấy sau {expanded} node.",
+        })
+        return steps
+
+    # ===========================
+    # GREEDY BEST-FIRST SEARCH
+    # ===========================
+
+    def build_steps_greedy(self, start_grid, start_pos):
+        """
+        Greedy Best-First Search: f = h (chỉ dùng heuristic, không quan tâm g).
+        - h = số ô bụi còn lại.
+        - Nhanh nhưng KHÔNG đảm bảo đường đi tối ưu.
+        - Late Goal Test + Closed Set.
+        """
+        steps = []
+        start_node = Node(start_grid, start_pos, None, "START", 0)
+        h_start = self.heuristic_vacuum(start_grid)
+        counter = 0
+        heap = [(h_start, counter, start_node)]
+        visited = set()
+
+        steps.append({
+            "type": "start",
+            "node": start_node,
+            "log": (
+                f"Khởi tạo Greedy Best-First. Máy hút bụi tại {start_pos}. "
+                f"Số ô bụi: {self.count_dirty(start_grid)}. h={h_start}."
+            ),
+        })
+
+        expanded = 0
+        while heap and expanded < MAX_STATES:
+            h_val, _, node = heapq.heappop(heap)
+            key = self.state_key(node.grid, node.pos)
+
+            if key in visited:
+                continue
+            visited.add(key)
+            expanded += 1
+
+            dirty_left = self.count_dirty(node.grid)
+
+            steps.append({
+                "type": "visit",
+                "node": node,
+                "log": f"Xét: h={h_val}, vị trí {node.pos}, còn {dirty_left} ô bụi.",
+            })
+
+            # Late Goal Test
+            if dirty_left == 0:
+                path = self.get_path(node)
+                steps.append({
+                    "type": "goal",
+                    "node": node,
+                    "path": path,
+                    "log": (
+                        f"✓ Hoàn tất! Greedy tìm thấy sau {expanded} node. "
+                        f"{len(path)-1} hành động. (Không đảm bảo tối ưu)"
+                    ),
+                })
+                return steps
+
+            for child in self.get_children(node):
+                child_key = self.state_key(child.grid, child.pos)
+                if child_key in visited:
+                    steps.append({
+                        "type": "dup",
+                        "node": child,
+                        "log": f"  Bỏ qua trùng: {child.action}, vị trí {child.pos}.",
+                    })
+                    continue
+
+                child_h = self.heuristic_vacuum(child.grid)
+                counter += 1
+                heapq.heappush(heap, (child_h, counter, child))
+                steps.append({
+                    "type": "gen",
+                    "node": child,
+                    "log": (
+                        f"  Sinh: {child.action}, vị trí {child.pos}, "
+                        f"h={child_h}, còn {self.count_dirty(child.grid)} ô bụi."
+                    ),
+                })
+
+        steps.append({
+            "type": "fail",
+            "node": None,
+            "log": f"✗ Không tìm thấy sau {expanded} node.",
+        })
+        return steps
+
+    # ===========================
+    # IDA* SEARCH
+    # ===========================
+
+    def build_steps_idastar(self, start_grid, start_pos):
+        """
+        IDA* (Iterative Deepening A*):
+        - Tăng dần ngưỡng f = g + h (h = số ô bụi còn lại).
+        - Mỗi lần lặp: DFS cắt tỉa khi f > ngưỡng.
+        - Tối ưu, tiết kiệm bộ nhớ hơn A*.
+        """
+        steps = []
+        start_node = Node(start_grid, start_pos, None, "START", 0)
+        h0 = self.heuristic_vacuum(start_grid)
+
+        steps.append({
+            "type": "start",
+            "node": start_node,
+            "log":  f"Khởi tạo IDA*. Máy hút bụi tại {start_pos}. h={h0}. Ngưỡng f ban đầu={h0}.",
+        })
+
+        if h0 == 0:
+            steps.append({
+                "type": "goal", "node": start_node, "path": [start_node],
+                "log":  "✓ START đã là mục tiêu.",
+            })
+            return steps
+
+        threshold      = h0
+        total_expanded = 0
+        MAX_IDA        = 3000
+
+        while threshold <= 200 and total_expanded < MAX_IDA:
+            steps.append({
+                "type": "iter",
+                "node": start_node,
+                "log":  f"── Lặp IDA*: ngưỡng f = {threshold} ──",
+            })
+
+            stack          = [(start_node, 0)]
+            next_threshold = float("inf")
+            visited        = set()
+
+            while stack:
+                if total_expanded >= MAX_IDA:
+                    steps.append({"type": "fail", "node": None,
+                                  "log": f"✗ Vượt giới hạn {MAX_IDA} node."})
+                    return steps
+
+                node, g = stack.pop()
+                key     = self.state_key(node.grid, node.pos)
+                if key in visited:
+                    continue
+                visited.add(key)
+                total_expanded += 1
+
+                h   = self.heuristic_vacuum(node.grid)
+                f   = g + h
+                dirty_left = self.count_dirty(node.grid)
+
+                steps.append({
+                    "type": "visit",
+                    "node": node,
+                    "log":  f"  Xét: g={g}, h={h}, f={f} (ngưỡng={threshold}), vị trí {node.pos}, bụi còn {dirty_left}.",
+                })
+
+                if dirty_left == 0:
+                    path = self.get_path(node)
+                    steps.append({
+                        "type": "goal", "node": node, "path": path,
+                        "log":  f"✓ Hoàn tất! IDA* tìm thấy: g={g}, f={f}. Tổng node: {total_expanded}.",
+                    })
+                    return steps
+
+                if f > threshold:
+                    if f < next_threshold:
+                        next_threshold = f
+                    steps.append({
+                        "type": "dup", "node": node,
+                        "log":  f"  Cắt: f={f} > ngưỡng={threshold}.",
+                    })
+                    continue
+
+                for child in self.get_children(node):
+                    child_key = self.state_key(child.grid, child.pos)
+                    if child_key not in visited:
+                        stack.append((child, g + 1))
+                        steps.append({
+                            "type": "gen", "node": child,
+                            "log":  f"  Sinh: {child.action}, vị trí {child.pos}, g={g+1}, h={self.heuristic_vacuum(child.grid)}.",
+                        })
+
+            if next_threshold == float("inf"):
+                break
+            threshold = next_threshold
+
+        steps.append({"type": "fail", "node": None,
+                      "log":  f"✗ IDA* không tìm thấy sau {total_expanded} node."})
+        return steps
+
+    # ===========================
+    # HILL-CLIMBING — ĐƠN GIẢN
+    # ===========================
+
+    def build_steps_hc_simple(self, start_grid, start_pos):
+        """
+        Simple Hill-Climbing:
+        - Chọn node con ĐẦU TIÊN có h < h(current).
+        - Không backtrack. Dừng nếu không cải thiện.
+        """
+        steps = []
+        start_node = Node(start_grid, start_pos, None, "START", 0)
+        h_cur = self.heuristic_vacuum(start_grid)
+        MAX_HC = 500
+
+        steps.append({
+            "type": "start", "node": start_node,
+            "log":  f"Khởi tạo HC Đơn giản. Tại {start_pos}. h={h_cur} (số ô bụi).",
+        })
+
+        current = start_node
+        itr     = 0
+        visited = {self.state_key(start_grid, start_pos)}
+
+        while itr < MAX_HC:
+            itr += 1
+            if self.count_dirty(current.grid) == 0:
+                path = self.get_path(current)
+                steps.append({
+                    "type": "goal", "node": current, "path": path,
+                    "log":  f"✓ HC Đơn giản: hút sạch tất cả bụi! Bước {itr}. {len(path)-1} hành động.",
+                })
+                return steps
+
+            children = self.get_children(current)
+            moved    = False
+
+            for child in children:
+                key     = self.state_key(child.grid, child.pos)
+                h_child = self.heuristic_vacuum(child.grid)
+                steps.append({
+                    "type": "gen", "node": child,
+                    "log":  f"  Kiểm tra: {child.action}, vị trí {child.pos}, h={h_child} vs h_cur={h_cur}.",
+                })
+                if h_child < h_cur and key not in visited:
+                    steps.append({
+                        "type": "visit", "node": child,
+                        "log":  f"  ✔ Chọn ngay node đầu tiên tốt hơn: {child.action}, h {h_cur}→{h_child}.",
+                    })
+                    visited.add(key)
+                    current = child
+                    h_cur   = h_child
+                    moved   = True
+                    break
+
+            if not moved:
+                steps.append({
+                    "type": "fail", "node": None,
+                    "log":  f"✗ HC Đơn giản bị kẹt: h={h_cur}, vị trí {current.pos}. Không thể cải thiện.",
+                })
+                return steps
+
+        steps.append({"type": "fail", "node": None,
+                      "log": f"✗ HC Đơn giản vượt giới hạn {MAX_HC} bước."})
+        return steps
+
+    # ===========================
+    # HILL-CLIMBING — NGẪU NHIÊN
+    # ===========================
+
+    def build_steps_hc_random(self, start_grid, start_pos):
+        """
+        Stochastic Hill-Climbing (Ngẫu nhiên):
+        - Tập hợp tất cả con có h < h(current), chọn NGẪU NHIÊN một node.
+        - Tăng đa dạng khám phá so với HC đơn giản.
+        """
+        import random
+        steps = []
+        start_node = Node(start_grid, start_pos, None, "START", 0)
+        h_cur = self.heuristic_vacuum(start_grid)
+        MAX_HC = 500
+
+        steps.append({
+            "type": "start", "node": start_node,
+            "log":  f"Khởi tạo HC Ngẫu nhiên. Tại {start_pos}. h={h_cur}.",
+        })
+
+        current = start_node
+        itr     = 0
+        visited = {self.state_key(start_grid, start_pos)}
+
+        while itr < MAX_HC:
+            itr += 1
+            if self.count_dirty(current.grid) == 0:
+                path = self.get_path(current)
+                steps.append({
+                    "type": "goal", "node": current, "path": path,
+                    "log":  f"✓ HC Ngẫu nhiên: hút sạch bụi! Bước {itr}. {len(path)-1} hành động.",
+                })
+                return steps
+
+            children = self.get_children(current)
+            better   = []
+
+            for child in children:
+                key     = self.state_key(child.grid, child.pos)
+                h_child = self.heuristic_vacuum(child.grid)
+                steps.append({
+                    "type": "gen", "node": child,
+                    "log":  f"  Đánh giá: {child.action}, vị trí {child.pos}, h={h_child}.",
+                })
+                if h_child < h_cur and key not in visited:
+                    better.append((child, h_child, key))
+
+            if not better:
+                steps.append({
+                    "type": "fail", "node": None,
+                    "log":  f"✗ HC Ngẫu nhiên bị kẹt: h={h_cur}. Không có node tốt hơn.",
+                })
+                return steps
+
+            chosen, chosen_h, chosen_key = random.choice(better)
+            steps.append({
+                "type": "visit", "node": chosen,
+                "log":  f"  🎲 Chọn ngẫu nhiên từ {len(better)} node tốt hơn: {chosen.action}, h {h_cur}→{chosen_h}.",
+            })
+            visited.add(chosen_key)
+            current = chosen
+            h_cur   = chosen_h
+
+        steps.append({"type": "fail", "node": None,
+                      "log": f"✗ HC Ngẫu nhiên vượt giới hạn {MAX_HC} bước."})
+        return steps
+
+    # ===========================
+    # HILL-CLIMBING — DỐC NHẤT
+    # ===========================
+
+    def build_steps_hc_steepest(self, start_grid, start_pos):
+        """
+        Steepest-Ascent Hill-Climbing (Dốc nhất):
+        - Xét TẤT CẢ node con, chọn node có h NHỎ NHẤT.
+        - Chỉ di chuyển nếu h_best < h_current.
+        """
+        steps = []
+        start_node = Node(start_grid, start_pos, None, "START", 0)
+        h_cur = self.heuristic_vacuum(start_grid)
+        MAX_HC = 500
+
+        steps.append({
+            "type": "start", "node": start_node,
+            "log":  f"Khởi tạo HC Dốc nhất. Tại {start_pos}. h={h_cur}.",
+        })
+
+        current = start_node
+        itr     = 0
+        visited = {self.state_key(start_grid, start_pos)}
+
+        while itr < MAX_HC:
+            itr += 1
+            if self.count_dirty(current.grid) == 0:
+                path = self.get_path(current)
+                steps.append({
+                    "type": "goal", "node": current, "path": path,
+                    "log":  f"✓ HC Dốc nhất: hút sạch bụi! Bước {itr}. {len(path)-1} hành động.",
+                })
+                return steps
+
+            children      = self.get_children(current)
+            best_child    = None
+            best_h        = h_cur
+            best_key      = None
+
+            for child in children:
+                key     = self.state_key(child.grid, child.pos)
+                h_child = self.heuristic_vacuum(child.grid)
+                steps.append({
+                    "type": "gen", "node": child,
+                    "log":  f"  Đánh giá: {child.action}, vị trí {child.pos}, h={h_child}.",
+                })
+                if h_child < best_h and key not in visited:
+                    best_h     = h_child
+                    best_child = child
+                    best_key   = key
+
+            if best_child is None:
+                steps.append({
+                    "type": "fail", "node": None,
+                    "log":  f"✗ HC Dốc nhất bị kẹt tại local optimum h={h_cur}. Vị trí {current.pos}.",
+                })
+                return steps
+
+            steps.append({
+                "type": "visit", "node": best_child,
+                "log":  f"  ↑ Chọn TỐT NHẤT: {best_child.action}, vị trí {best_child.pos}, h {h_cur}→{best_h}.",
+            })
+            visited.add(best_key)
+            current = best_child
+            h_cur   = best_h
+
+        steps.append({"type": "fail", "node": None,
+                      "log": f"✗ HC Dốc nhất vượt giới hạn {MAX_HC} bước."})
+        return steps
+
+
+    # ===========================
+    # LOCAL BEAM SEARCH
+    # ===========================
+
+    def build_steps_local_beam(self, start_grid, start_pos):
+        """
+        Local Beam Search:
+        - Giữ đồng thời k trạng thái tốt nhất (beam).
+        - Mỗi vòng sinh con từ toàn bộ beam, rồi chọn k node có h nhỏ nhất.
+        - h = số ô bụi còn lại; không đảm bảo tối ưu nhưng thường thoát kẹt tốt hơn HC.
+        """
+        steps = []
+        BEAM_WIDTH = 3
+        MAX_BEAM_ITERS = 500
+
+        start_node = Node(start_grid, start_pos, None, "START", 0)
+        h_start = self.heuristic_vacuum(start_grid)
+        beam = [start_node]
+        visited = {self.state_key(start_grid, start_pos)}
+
+        steps.append({
+            "type": "start",
+            "node": start_node,
+            "log": (
+                f"Khởi tạo Local Beam Search. k={BEAM_WIDTH}. "
+                f"Máy hút bụi tại {start_pos}. h(start)={h_start}."
+            ),
+        })
+
+        if self.count_dirty(start_grid) == 0:
+            steps.append({
+                "type": "goal",
+                "node": start_node,
+                "path": [start_node],
+                "log": "✓ START đã là trạng thái mục tiêu vì không còn bụi.",
+            })
+            return steps
+
+        expanded = 0
+        for itr in range(1, MAX_BEAM_ITERS + 1):
+            beam_info = ", ".join(
+                f"{node.pos}/h={self.heuristic_vacuum(node.grid)}" for node in beam
+            )
+            steps.append({
+                "type": "iter",
+                "node": beam[0],
+                "log": f"── Beam vòng {itr}: {len(beam)} trạng thái đang xét [{beam_info}] ──",
+            })
+
+            candidates = []
+            for node in beam:
+                expanded += 1
+                dirty_left = self.count_dirty(node.grid)
+                steps.append({
+                    "type": "visit",
+                    "node": node,
+                    "log": f"Xét beam node: độ sâu {node.depth}, vị trí {node.pos}, còn {dirty_left} ô bụi.",
+                })
+
+                if dirty_left == 0:
+                    path = self.get_path(node)
+                    steps.append({
+                        "type": "goal",
+                        "node": node,
+                        "path": path,
+                        "log": f"✓ Local Beam Search tìm thấy lời giải sau {expanded} node. {len(path)-1} hành động.",
+                    })
+                    return steps
+
+                for child in self.get_children(node):
+                    key = self.state_key(child.grid, child.pos)
+                    h_child = self.heuristic_vacuum(child.grid)
+
+                    if key in visited:
+                        steps.append({
+                            "type": "dup",
+                            "node": child,
+                            "log": f"  Bỏ qua trùng: {child.action}, vị trí {child.pos}, h={h_child}.",
+                        })
+                        continue
+
+                    visited.add(key)
+                    candidates.append((h_child, child.depth, child))
+                    steps.append({
+                        "type": "gen",
+                        "node": child,
+                        "log": f"  Sinh ứng viên: {child.action}, vị trí {child.pos}, h={h_child}.",
+                    })
+
+                    if h_child == 0:
+                        path = self.get_path(child)
+                        steps.append({
+                            "type": "goal",
+                            "node": child,
+                            "path": path,
+                            "log": f"✓ Local Beam Search sinh ra trạng thái sạch bụi. {len(path)-1} hành động.",
+                        })
+                        return steps
+
+            if not candidates:
+                steps.append({
+                    "type": "fail",
+                    "node": None,
+                    "log": "✗ Local Beam Search dừng: không còn ứng viên mới để mở rộng.",
+                })
+                return steps
+
+            candidates.sort(key=lambda item: (item[0], item[1]))
+            beam = [child for _, _, child in candidates[:BEAM_WIDTH]]
+            chosen_info = ", ".join(
+                f"{child.action}@{child.pos}/h={h}" for h, _, child in candidates[:BEAM_WIDTH]
+            )
+            steps.append({
+                "type": "visit",
+                "node": beam[0],
+                "log": f"  Chọn {len(beam)} ứng viên tốt nhất cho beam kế tiếp: {chosen_info}.",
+            })
+
+            if expanded >= MAX_STATES:
+                steps.append({
+                    "type": "fail",
+                    "node": None,
+                    "log": f"✗ Local Beam Search vượt giới hạn {MAX_STATES} node.",
+                })
+                return steps
+
+        steps.append({
+            "type": "fail",
+            "node": None,
+            "log": f"✗ Local Beam Search vượt giới hạn {MAX_BEAM_ITERS} vòng lặp.",
+        })
+        return steps
+
   
 
     def clear_canvas(self):
@@ -844,12 +1598,20 @@ class VacuumApp:
                 btn.config(bg="#eeeeee")
 
         names = {
-            "bfs": "BFS - Late Goal Test",
-            "bfs-e": "BFS - Early Goal Test",
-            "dfs": "DFS - Late Goal Test",
-            "dfs-e": "DFS - Early Goal Test",
-            "ids": "IDS - Late Goal Test",
-            "ids-e": "IDS - Early Goal Test",
+            "bfs":         "BFS - Late Goal Test",
+            "bfs-e":       "BFS - Early Goal Test",
+            "dfs":         "DFS - Late Goal Test",
+            "dfs-e":       "DFS - Early Goal Test",
+            "ids":         "IDS - Late Goal Test",
+            "ids-e":       "IDS - Early Goal Test",
+            "ucs":         "UCS - Uniform Cost Search",
+            "astar":       "A* Search",
+            "greedy":      "Greedy Best-First Search",
+            "idastar":     "IDA* Search",
+            "hc_simple":   "HC - Leo dốc đơn giản",
+            "hc_random":   "HC - Leo dốc ngẫu nhiên",
+            "hc_steepest": "HC - Dốc nhất (Steepest-Ascent)",
+            "local_beam":  "Local Beam Search",
         }
         display_name = names[name]
         self.vis_title.config(text=display_name.upper())

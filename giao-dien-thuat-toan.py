@@ -7,6 +7,7 @@
 import tkinter as tk
 from tkinter import ttk, messagebox
 from collections import deque
+import heapq
 
 
 # 8-PUZZLE giao diện 
@@ -136,14 +137,30 @@ class PuzzleApp:
         self.btn_dfs_e = self.make_button(self.left, "DFS  - Early Goal Test", lambda: self.select_algo("dfs-e"), self.accent3)
         self.btn_ids = self.make_button(self.left, "IDS  - Late Goal Test", lambda: self.select_algo("ids"), self.accent)
         self.btn_ids_e = self.make_button(self.left, "IDS  - Early Goal Test", lambda: self.select_algo("ids-e"), self.accent3)
+        self.btn_ucs = self.make_button(self.left, "UCS", lambda: self.select_algo("ucs"), self.accent)
+        self.btn_astar = self.make_button(self.left, "A*  Search", lambda: self.select_algo("astar"), self.accent2)
+        self.btn_greedy = self.make_button(self.left, "Greedy Best-First", lambda: self.select_algo("greedy"), self.accent4)
+        self.btn_idastar = self.make_button(self.left, "IDA* Search", lambda: self.select_algo("idastar"), self.accent2)
+        self.btn_hc_simple = self.make_button(self.left, "HC  - Leo dốc đơn giản", lambda: self.select_algo("hc_simple"), self.accent4)
+        self.btn_hc_random = self.make_button(self.left, "HC  - Leo dốc ngẫu nhiên", lambda: self.select_algo("hc_random"), self.accent4)
+        self.btn_hc_steepest = self.make_button(self.left, "HC  - Dốc nhất", lambda: self.select_algo("hc_steepest"), self.accent4)
+        self.btn_lbs = self.make_button(self.left, "Local Beam Search", lambda: self.select_algo("local_beam"), self.accent4)
 
         self.algo_buttons = {
-            "bfs":   self.btn_bfs,
-            "bfs-e": self.btn_bfs_e,
-            "dfs":   self.btn_dfs,
-            "dfs-e": self.btn_dfs_e,
-            "ids":   self.btn_ids,
-            "ids-e": self.btn_ids_e,
+            "bfs":        self.btn_bfs,
+            "bfs-e":      self.btn_bfs_e,
+            "dfs":        self.btn_dfs,
+            "dfs-e":      self.btn_dfs_e,
+            "ids":        self.btn_ids,
+            "ids-e":      self.btn_ids_e,
+            "ucs":        self.btn_ucs,
+            "astar":      self.btn_astar,
+            "greedy":     self.btn_greedy,
+            "idastar":    self.btn_idastar,
+            "hc_simple":  self.btn_hc_simple,
+            "hc_random":  self.btn_hc_random,
+            "hc_steepest":self.btn_hc_steepest,
+            "local_beam": self.btn_lbs,
         }
 
         self.section_title(self.left, "Điều khiển")
@@ -536,6 +553,22 @@ class PuzzleApp:
     def build_steps(self, algo, start, goal):
         if algo.startswith("ids"):
             return self.build_steps_ids(algo, start, goal)
+        if algo == "ucs":
+            return self.build_steps_ucs(start, goal)
+        if algo == "astar":
+            return self.build_steps_astar(start, goal)
+        if algo == "greedy":
+            return self.build_steps_greedy(start, goal)
+        if algo == "idastar":
+            return self.build_steps_idastar(start, goal)
+        if algo == "hc_simple":
+            return self.build_steps_hc_simple(start, goal)
+        if algo == "hc_random":
+            return self.build_steps_hc_random(start, goal)
+        if algo == "hc_steepest":
+            return self.build_steps_hc_steepest(start, goal)
+        if algo == "local_beam":
+            return self.build_steps_local_beam(start, goal)
 
         goal_key = self.state_key(goal)
         steps = []
@@ -817,8 +850,866 @@ class PuzzleApp:
         })
         return steps
 
+    # ===========================
+    # HEURISTIC
+    # ===========================
+
+    def heuristic_puzzle(self, state, goal):
+        """
+        Manhattan distance: tổng khoảng cách Manhattan của từng ô về vị trí đúng.
+        Admissible + Consistent → A* tối ưu với closed set.
+        """
+        total = 0
+        for i, v in enumerate(state):
+            if v != 0:
+                gi = goal.index(v)
+                total += abs(i // 3 - gi // 3) + abs(i % 3 - gi % 3)
+        return total
+
+    # ===========================
+    # UCS
+    # ===========================
+
+    def build_steps_ucs(self, start, goal):
+        """
+        UCS - Uniform Cost Search:
+        - Priority queue theo g (chi phí thực, mỗi hành động = 1).
+        - Sinh hết node con, đưa tất cả vào hàng đợi, rồi chọn node có g nhỏ nhất.
+        - Chỉ Late Goal Test → đảm bảo đường đi tối ưu.
+        - Closed set: trạng thái pop lần đầu là tối ưu.
+        """
+        goal_key = self.state_key(goal)
+        steps = []
+
+        start_node = Node(start, None, 0, "START")
+        counter = 0
+        heap = [(0, counter, start_node)]
+        visited = set()
+        label_map = {self.state_key(start): "S0"}
+        expanded = 0
+
+        steps.append({
+            "type": "expand",
+            "state": start,
+            "label": "S0",
+            "log": "Khởi tạo UCS. Đưa START (S0) vào hàng đợi ưu tiên (g=0).",
+        })
+
+        while heap and expanded < MAX_NODES:
+            g, _, node = heapq.heappop(heap)
+            key = self.state_key(node.state)
+
+            if key in visited:
+                continue
+            visited.add(key)
+            expanded += 1
+
+            node_label = label_map.get(key, f"N{expanded}")
+
+            # Late Goal Test
+            if key == goal_key:
+                path = self.get_path(node)
+                steps.append({
+                    "type": "goal",
+                    "state": node.state,
+                    "label": node_label + " = GOAL",
+                    "path": path,
+                    "log": (
+                        f"✓ Tìm thấy GOAL = {node_label}. "
+                        f"Chi phí tối ưu g={g}. Độ sâu: {node.depth}."
+                    ),
+                })
+                return steps
+
+            steps.append({
+                "type": "expand",
+                "state": node.state,
+                "label": "Xét " + node_label,
+                "log": f"Xét {node_label} {node.state} - g={g}, Độ sâu {node.depth}.",
+            })
+
+            # Sinh hết node con rồi đưa vào hàng đợi
+            for child in self.get_children(node.state):
+                ck = self.state_key(child["state"])
+                changed = [i for i, v in enumerate(child["state"]) if v != node.state[i]]
+                new_g = g + 1
+
+                if ck in visited:
+                    dup_label = label_map.get(ck, "?")
+                    steps.append({
+                        "type": "dup",
+                        "state": child["state"],
+                        "label": "Dup",
+                        "changed": changed,
+                        "log": f"  {child['state']} ({child['icon']}) - TRÙNG với {dup_label} (đã xét tối ưu), bỏ qua.",
+                    })
+                else:
+                    child_label = label_map.get(ck)
+                    if not child_label:
+                        child_label = self.next_node_label()
+                        label_map[ck] = child_label
+
+                    child_node = Node(child["state"], node, node.depth + 1, child["move"])
+                    counter += 1
+                    heapq.heappush(heap, (new_g, counter, child_node))
+
+                    steps.append({
+                        "type": "gen",
+                        "state": child["state"],
+                        "label": child_label,
+                        "changed": changed,
+                        "log": f"  Sinh {child_label} {child['state']} ({child['icon']}) → g={new_g}.",
+                    })
+
+        steps.append({
+            "type": "fail",
+            "log": f"✗ Không tìm thấy sau {expanded} node.",
+        })
+        return steps
+
+    # ===========================
+    # A* SEARCH
+    # ===========================
+
+    def build_steps_astar(self, start, goal):
+        """
+        A* Search: f = g + h (Manhattan distance).
+        - g = chi phí thực (số bước đã đi).
+        - h = Manhattan distance → admissible + consistent.
+        - Closed set hợp lệ nhờ h consistent.
+        - Late Goal Test → đảm bảo tối ưu.
+        """
+        goal_key = self.state_key(goal)
+        steps = []
+
+        start_node = Node(start, None, 0, "START")
+        h_start = self.heuristic_puzzle(start, goal)
+        f_start = 0 + h_start
+        counter = 0
+        heap = [(f_start, counter, start_node)]
+        visited = set()
+        label_map = {self.state_key(start): "S0"}
+        expanded = 0
+
+        steps.append({
+            "type": "expand",
+            "state": start,
+            "label": "S0",
+            "log": (
+                f"Khởi tạo A*. g=0, h={h_start} (Manhattan), f={f_start}. "
+                f"Đưa START (S0) vào hàng đợi ưu tiên."
+            ),
+        })
+
+        while heap and expanded < MAX_NODES:
+            f, _, node = heapq.heappop(heap)
+            key = self.state_key(node.state)
+
+            if key in visited:
+                continue
+            visited.add(key)
+            expanded += 1
+
+            g = node.depth
+            h = self.heuristic_puzzle(node.state, goal)
+            node_label = label_map.get(key, f"N{expanded}")
+
+            # Late Goal Test
+            if key == goal_key:
+                path = self.get_path(node)
+                steps.append({
+                    "type": "goal",
+                    "state": node.state,
+                    "label": node_label + " = GOAL",
+                    "path": path,
+                    "log": (
+                        f"✓ Tìm thấy GOAL = {node_label}. "
+                        f"g={g}, h={h}, f={g+h}. Độ sâu: {node.depth}."
+                    ),
+                })
+                return steps
+
+            steps.append({
+                "type": "expand",
+                "state": node.state,
+                "label": "Xét " + node_label,
+                "log": f"Xét {node_label} {node.state} - g={g}, h={h}, f={g+h}.",
+            })
+
+            for child in self.get_children(node.state):
+                ck = self.state_key(child["state"])
+                changed = [i for i, v in enumerate(child["state"]) if v != node.state[i]]
+
+                if ck in visited:
+                    dup_label = label_map.get(ck, "?")
+                    steps.append({
+                        "type": "dup",
+                        "state": child["state"],
+                        "label": "Dup",
+                        "changed": changed,
+                        "log": f"  {child['state']} ({child['icon']}) - TRÙNG với {dup_label} (đã xét tối ưu), bỏ qua.",
+                    })
+                else:
+                    child_g = g + 1
+                    child_h = self.heuristic_puzzle(child["state"], goal)
+                    child_f = child_g + child_h
+
+                    child_label = label_map.get(ck)
+                    if not child_label:
+                        child_label = self.next_node_label()
+                        label_map[ck] = child_label
+
+                    child_node = Node(child["state"], node, node.depth + 1, child["move"])
+                    counter += 1
+                    heapq.heappush(heap, (child_f, counter, child_node))
+
+                    steps.append({
+                        "type": "gen",
+                        "state": child["state"],
+                        "label": child_label,
+                        "changed": changed,
+                        "log": (
+                            f"  Sinh {child_label} {child['state']} ({child['icon']}) "
+                            f"→ g={child_g}, h={child_h}, f={child_f}."
+                        ),
+                    })
+
+        steps.append({
+            "type": "fail",
+            "log": f"✗ Không tìm thấy sau {expanded} node.",
+        })
+        return steps
+
+    # ===========================
+    # GREEDY BEST-FIRST SEARCH
+    # ===========================
+
+    def build_steps_greedy(self, start, goal):
+        """
+        Greedy Best-First Search: f = h (chỉ dùng heuristic, không quan tâm g).
+        - h = Manhattan distance.
+        - Nhanh nhưng KHÔNG đảm bảo tối ưu.
+        - Late Goal Test + Closed Set.
+        """
+        goal_key = self.state_key(goal)
+        steps = []
+
+        start_node = Node(start, None, 0, "START")
+        h_start = self.heuristic_puzzle(start, goal)
+        counter = 0
+        heap = [(h_start, counter, start_node)]
+        visited = set()
+        label_map = {self.state_key(start): "S0"}
+        expanded = 0
+
+        steps.append({
+            "type": "expand",
+            "state": start,
+            "label": "S0",
+            "log": (
+                f"Khởi tạo Greedy Best-First. h={h_start} (Manhattan). "
+                f"Đưa START (S0) vào hàng đợi."
+            ),
+        })
+
+        while heap and expanded < MAX_NODES:
+            h_val, _, node = heapq.heappop(heap)
+            key = self.state_key(node.state)
+
+            if key in visited:
+                continue
+            visited.add(key)
+            expanded += 1
+
+            node_label = label_map.get(key, f"N{expanded}")
+
+            # Late Goal Test
+            if key == goal_key:
+                path = self.get_path(node)
+                steps.append({
+                    "type": "goal",
+                    "state": node.state,
+                    "label": node_label + " = GOAL",
+                    "path": path,
+                    "log": (
+                        f"✓ Tìm thấy GOAL = {node_label}. "
+                        f"Greedy không đảm bảo tối ưu. Độ sâu: {node.depth}."
+                    ),
+                })
+                return steps
+
+            steps.append({
+                "type": "expand",
+                "state": node.state,
+                "label": "Xét " + node_label,
+                "log": f"Xét {node_label} {node.state} - h={h_val} (Greedy).",
+            })
+
+            for child in self.get_children(node.state):
+                ck = self.state_key(child["state"])
+                changed = [i for i, v in enumerate(child["state"]) if v != node.state[i]]
+
+                if ck in visited:
+                    dup_label = label_map.get(ck, "?")
+                    steps.append({
+                        "type": "dup",
+                        "state": child["state"],
+                        "label": "Dup",
+                        "changed": changed,
+                        "log": f"  {child['state']} ({child['icon']}) - TRÙNG với {dup_label}, bỏ qua.",
+                    })
+                else:
+                    child_h = self.heuristic_puzzle(child["state"], goal)
+
+                    child_label = label_map.get(ck)
+                    if not child_label:
+                        child_label = self.next_node_label()
+                        label_map[ck] = child_label
+
+                    child_node = Node(child["state"], node, node.depth + 1, child["move"])
+                    counter += 1
+                    heapq.heappush(heap, (child_h, counter, child_node))
+
+                    steps.append({
+                        "type": "gen",
+                        "state": child["state"],
+                        "label": child_label,
+                        "changed": changed,
+                        "log": f"  Sinh {child_label} {child['state']} ({child['icon']}) → h={child_h}.",
+                    })
+
+        steps.append({
+            "type": "fail",
+            "log": f"✗ Không tìm thấy sau {expanded} node.",
+        })
+        return steps
+
+    # ===========================
+    # IDA* SEARCH
+    # ===========================
+
+    def build_steps_idastar(self, start, goal):
+        """
+        IDA* (Iterative Deepening A*):
+        - Tăng dần ngưỡng f = g + h (bắt đầu từ h(start)).
+        - Mỗi lần lặp: DFS giới hạn bởi ngưỡng f thay vì độ sâu.
+        - Tối ưu nếu h admissible. Tiết kiệm bộ nhớ hơn A*.
+        - Late Goal Test.
+        """
+        goal_key = self.state_key(goal)
+        steps = []
+
+        h0 = self.heuristic_puzzle(start, goal)
+        steps.append({
+            "type":  "expand",
+            "state": start,
+            "label": "S0",
+            "log":   f"Khởi tạo IDA*. h(start)={h0}. Ngưỡng f ban đầu = {h0}.",
+        })
+
+        threshold = h0
+        total_expanded = 0
+        MAX_IDA = 2000
+
+        while threshold <= 100 and total_expanded < MAX_IDA:
+            # ── Tiêu đề lần lặp ──────────────────────────────────────────
+            steps.append({
+                "type":        "iter",
+                "state":       start,
+                "depth_limit": threshold,
+                "log":         f"── Lặp IDA*: ngưỡng f = {threshold} ──",
+            })
+
+            start_node = Node(start, None, 0, "START")
+            stack = [(start_node, 0)]       # (node, g)
+            next_threshold = float("inf")
+            label_counter_backup = self.node_label_counter
+            self.node_label_counter = 0
+            label_map = {self.state_key(start): "S0"}
+
+            found = False
+            while stack:
+                if total_expanded >= MAX_IDA:
+                    steps.append({
+                        "type": "fail",
+                        "log":  f"✗ Đã xét {total_expanded} node, vượt giới hạn {MAX_IDA}. Dừng.",
+                    })
+                    return steps
+
+                node, g = stack.pop()
+                node_key   = self.state_key(node.state)
+                node_label = label_map.get(node_key, f"N{total_expanded}")
+                h = self.heuristic_puzzle(node.state, goal)
+                f = g + h
+                total_expanded += 1
+
+                steps.append({
+                    "type":  "expand",
+                    "state": node.state,
+                    "label": node_label,
+                    "log":   f"Xét {node_label} {node.state} g={g}, h={h}, f={f} (ngưỡng={threshold}).",
+                })
+
+                if node_key == goal_key:
+                    path = self.get_path(node)
+                    steps.append({
+                        "type":  "goal",
+                        "state": node.state,
+                        "label": node_label + " = GOAL",
+                        "path":  path,
+                        "log":   f"✓ Tìm thấy GOAL! g={g}, h={h}, f={f}. Tổng node xét: {total_expanded}.",
+                    })
+                    return steps
+
+                if f > threshold:
+                    if f < next_threshold:
+                        next_threshold = f
+                    steps.append({
+                        "type":  "dup",
+                        "state": node.state,
+                        "label": "✂f",
+                        "log":   f"  Cắt: f={f} > ngưỡng={threshold}. next_threshold={next_threshold}.",
+                    })
+                    continue
+
+                children = self.get_children(node.state)
+                # push đảo ngược để xét thứ tự đúng
+                for child in reversed(children):
+                    ck = self.state_key(child["state"])
+                    changed = [i for i, v in enumerate(child["state"]) if v != node.state[i]]
+                    child_label = label_map.get(ck)
+                    if not child_label:
+                        child_label = self.next_node_label()
+                        label_map[ck] = child_label
+                    child_node = Node(child["state"], node, node.depth + 1, child["move"])
+                    stack.append((child_node, g + 1))
+                    steps.append({
+                        "type":    "gen",
+                        "state":   child["state"],
+                        "label":   child_label,
+                        "changed": changed,
+                        "log":     f"  Sinh {child_label} {child['state']} ({child['icon']}) → stack.",
+                    })
+
+            if next_threshold == float("inf"):
+                break
+            threshold = next_threshold
+
+        steps.append({
+            "type": "fail",
+            "log":  f"✗ IDA* không tìm thấy sau {total_expanded} node.",
+        })
+        return steps
+
+    # ===========================
+    # HILL-CLIMBING — ĐƠN GIẢN
+    # ===========================
+
+    def build_steps_hc_simple(self, start, goal):
+        """
+        Hill-Climbing đơn giản (Simple Hill-Climbing):
+        - Chọn node con ĐẦU TIÊN có h < h(current).
+        - Không backtrack. Dừng khi không cải thiện (local optimum / plateau).
+        - Không đảm bảo tìm thấy lời giải tối ưu.
+        """
+        goal_key  = self.state_key(goal)
+        steps     = []
+        MAX_HC    = 500
+
+        steps.append({
+            "type":  "expand",
+            "state": start,
+            "label": "S0",
+            "log":   f"Khởi tạo HC Đơn giản. h(start)={self.heuristic_puzzle(start, goal)}.",
+        })
+
+        current = Node(start, None, 0, "START")
+        h_cur   = self.heuristic_puzzle(start, goal)
+        itr     = 0
+        visited = {self.state_key(start)}
+
+        while itr < MAX_HC:
+            itr += 1
+            cur_key = self.state_key(current.state)
+
+            if cur_key == goal_key:
+                path = self.get_path(current)
+                steps.append({
+                    "type":  "goal",
+                    "state": current.state,
+                    "label": "GOAL!",
+                    "path":  path,
+                    "log":   f"✓ Tìm thấy GOAL! h=0. Bước thứ {itr}.",
+                })
+                return steps
+
+            children = self.get_children(current.state)
+            moved    = False
+
+            for child in children:
+                ck = self.state_key(child["state"])
+                h_child = self.heuristic_puzzle(child["state"], goal)
+                changed  = [i for i, v in enumerate(child["state"]) if v != current.state[i]]
+
+                steps.append({
+                    "type":    "gen",
+                    "state":   child["state"],
+                    "label":   f"h={h_child}",
+                    "changed": changed,
+                    "log":     f"  Kiểm tra {child['state']} ({child['icon']}) h={h_child} vs h_cur={h_cur}.",
+                })
+
+                if h_child < h_cur and ck not in visited:
+                    child_node = Node(child["state"], current, current.depth + 1, child["move"])
+                    steps.append({
+                        "type":  "expand",
+                        "state": child["state"],
+                        "label": f"Chọn h={h_child}",
+                        "log":   f"  ✔ Chọn ngay node đầu tiên tốt hơn: h {h_cur}→{h_child}. Bước {itr}.",
+                    })
+                    visited.add(ck)
+                    current = child_node
+                    h_cur   = h_child
+                    moved   = True
+                    break
+
+            if not moved:
+                steps.append({
+                    "type": "fail",
+                    "log":  f"✗ HC Đơn giản bị kẹt tại local optimum h={h_cur}. Không tìm được lời giải.",
+                })
+                return steps
+
+        steps.append({"type": "fail", "log": f"✗ HC Đơn giản vượt giới hạn {MAX_HC} bước."})
+        return steps
+
+    # ===========================
+    # HILL-CLIMBING — NGẪU NHIÊN
+    # ===========================
+
+    def build_steps_hc_random(self, start, goal):
+        """
+        Hill-Climbing ngẫu nhiên (Stochastic Hill-Climbing):
+        - Tập hợp tất cả node con có h < h(current).
+        - Chọn ngẫu nhiên MỘT trong số các node tốt hơn đó.
+        - Khác HC đơn giản: không phải luôn chọn node đầu tiên.
+        """
+        import random
+        goal_key  = self.state_key(goal)
+        steps     = []
+        MAX_HC    = 500
+
+        h_start = self.heuristic_puzzle(start, goal)
+        steps.append({
+            "type":  "expand",
+            "state": start,
+            "label": "S0",
+            "log":   f"Khởi tạo HC Ngẫu nhiên. h(start)={h_start}.",
+        })
+
+        current = Node(start, None, 0, "START")
+        h_cur   = h_start
+        itr     = 0
+        visited = {self.state_key(start)}
+
+        while itr < MAX_HC:
+            itr += 1
+            cur_key = self.state_key(current.state)
+
+            if cur_key == goal_key:
+                path = self.get_path(current)
+                steps.append({
+                    "type":  "goal",
+                    "state": current.state,
+                    "label": "GOAL!",
+                    "path":  path,
+                    "log":   f"✓ Tìm thấy GOAL! h=0. Bước thứ {itr}.",
+                })
+                return steps
+
+            children   = self.get_children(current.state)
+            better     = []
+
+            for child in children:
+                ck      = self.state_key(child["state"])
+                h_child = self.heuristic_puzzle(child["state"], goal)
+                changed  = [i for i, v in enumerate(child["state"]) if v != current.state[i]]
+                steps.append({
+                    "type":    "gen",
+                    "state":   child["state"],
+                    "label":   f"h={h_child}",
+                    "changed": changed,
+                    "log":     f"  Đánh giá {child['state']} ({child['icon']}) h={h_child}.",
+                })
+                if h_child < h_cur and ck not in visited:
+                    better.append((child, h_child, ck))
+
+            if not better:
+                steps.append({
+                    "type": "fail",
+                    "log":  f"✗ HC Ngẫu nhiên bị kẹt tại local optimum h={h_cur}. Không tìm được lời giải.",
+                })
+                return steps
+
+            chosen_child, chosen_h, chosen_k = random.choice(better)
+            child_node = Node(chosen_child["state"], current, current.depth + 1, chosen_child["move"])
+            changed = [i for i, v in enumerate(chosen_child["state"]) if v != current.state[i]]
+            steps.append({
+                "type":    "expand",
+                "state":   chosen_child["state"],
+                "label":   f"Chọn ngẫu h={chosen_h}",
+                "changed": changed,
+                "log":     f"  🎲 Chọn ngẫu nhiên từ {len(better)} node tốt hơn: {chosen_child['state']} h={chosen_h}. Bước {itr}.",
+            })
+            visited.add(chosen_k)
+            current = child_node
+            h_cur   = chosen_h
+
+        steps.append({"type": "fail", "log": f"✗ HC Ngẫu nhiên vượt giới hạn {MAX_HC} bước."})
+        return steps
+
+    # ===========================
+    # HILL-CLIMBING — DỐC NHẤT
+    # ===========================
+
+    def build_steps_hc_steepest(self, start, goal):
+        """
+        Steepest-Ascent Hill-Climbing (Dốc nhất):
+        - Xét TẤT CẢ node con, chọn node có h NHỎ NHẤT (tốt nhất).
+        - Chỉ di chuyển nếu h_best < h_current (không đi ngang / đi lên).
+        - Không đảm bảo tối ưu toàn cục.
+        """
+        goal_key  = self.state_key(goal)
+        steps     = []
+        MAX_HC    = 500
+
+        h_start = self.heuristic_puzzle(start, goal)
+        steps.append({
+            "type":  "expand",
+            "state": start,
+            "label": "S0",
+            "log":   f"Khởi tạo HC Dốc nhất. h(start)={h_start}.",
+        })
+
+        current = Node(start, None, 0, "START")
+        h_cur   = h_start
+        itr     = 0
+        visited = {self.state_key(start)}
+
+        while itr < MAX_HC:
+            itr += 1
+            cur_key = self.state_key(current.state)
+
+            if cur_key == goal_key:
+                path = self.get_path(current)
+                steps.append({
+                    "type":  "goal",
+                    "state": current.state,
+                    "label": "GOAL!",
+                    "path":  path,
+                    "log":   f"✓ Tìm thấy GOAL! h=0. Bước thứ {itr}.",
+                })
+                return steps
+
+            children    = self.get_children(current.state)
+            best_child  = None
+            best_h      = h_cur
+            best_ck     = None
+
+            for child in children:
+                ck      = self.state_key(child["state"])
+                h_child = self.heuristic_puzzle(child["state"], goal)
+                changed  = [i for i, v in enumerate(child["state"]) if v != current.state[i]]
+                steps.append({
+                    "type":    "gen",
+                    "state":   child["state"],
+                    "label":   f"h={h_child}",
+                    "changed": changed,
+                    "log":     f"  Đánh giá {child['state']} ({child['icon']}) h={h_child}.",
+                })
+                if h_child < best_h and ck not in visited:
+                    best_h     = h_child
+                    best_child = child
+                    best_ck    = ck
+
+            if best_child is None:
+                steps.append({
+                    "type": "fail",
+                    "log":  f"✗ HC Dốc nhất bị kẹt tại local optimum h={h_cur}. Không tìm được lời giải.",
+                })
+                return steps
+
+            child_node = Node(best_child["state"], current, current.depth + 1, best_child["move"])
+            changed    = [i for i, v in enumerate(best_child["state"]) if v != current.state[i]]
+            steps.append({
+                "type":    "expand",
+                "state":   best_child["state"],
+                "label":   f"Best h={best_h}",
+                "changed": changed,
+                "log":     f"  ↑ Chọn node TỐT NHẤT trong tất cả: {best_child['state']} h={best_h} (h_cur={h_cur}). Bước {itr}.",
+            })
+            visited.add(best_ck)
+            current = child_node
+            h_cur   = best_h
+
+        steps.append({"type": "fail", "log": f"✗ HC Dốc nhất vượt giới hạn {MAX_HC} bước."})
+        return steps
+
+
+    # ===========================
+    # LOCAL BEAM SEARCH
+    # ===========================
+
+    def build_steps_local_beam(self, start, goal):
+        """
+        Local Beam Search:
+        - Giữ đồng thời k trạng thái tốt nhất (beam).
+        - Mỗi vòng sinh con từ toàn bộ beam, rồi chọn k node có h nhỏ nhất.
+        - h = Manhattan distance; không đảm bảo tối ưu như A*.
+        """
+        goal_key = self.state_key(goal)
+        steps = []
+        BEAM_WIDTH = 3
+        MAX_BEAM_ITERS = 500
+
+        h_start = self.heuristic_puzzle(start, goal)
+        start_node = Node(start, None, 0, "START")
+        beam = [start_node]
+        visited = {self.state_key(start)}
+        label_map = {self.state_key(start): "S0"}
+
+        steps.append({
+            "type": "expand",
+            "state": start,
+            "label": "S0",
+            "log": f"Khởi tạo Local Beam Search. k={BEAM_WIDTH}. h(start)={h_start}.",
+        })
+
+        if self.state_key(start) == goal_key:
+            steps.append({
+                "type": "goal",
+                "state": start,
+                "label": "GOAL!",
+                "path": [{"state": start, "move": "START"}],
+                "log": "START chính là GOAL.",
+            })
+            return steps
+
+        expanded = 0
+        for itr in range(1, MAX_BEAM_ITERS + 1):
+            beam_info = ", ".join(
+                f"{label_map.get(self.state_key(node.state), '?')}/h={self.heuristic_puzzle(node.state, goal)}"
+                for node in beam
+            )
+            steps.append({
+                "type": "dup",
+                "state": beam[0].state,
+                "label": "Beam",
+                "log": f"── Beam vòng {itr}: {len(beam)} trạng thái đang xét [{beam_info}] ──",
+            })
+
+            candidates = []
+            for node in beam:
+                expanded += 1
+                node_key = self.state_key(node.state)
+                node_label = label_map.get(node_key, "?")
+                h_cur = self.heuristic_puzzle(node.state, goal)
+
+                steps.append({
+                    "type": "expand",
+                    "state": node.state,
+                    "label": f"Xét {node_label}",
+                    "log": f"Xét beam node {node_label} {node.state} - h={h_cur}, độ sâu {node.depth}.",
+                })
+
+                if node_key == goal_key:
+                    path = self.get_path(node)
+                    steps.append({
+                        "type": "goal",
+                        "state": node.state,
+                        "label": node_label + " = GOAL",
+                        "path": path,
+                        "log": f"✓ Local Beam Search tìm thấy GOAL sau {expanded} node. Độ sâu: {node.depth}.",
+                    })
+                    return steps
+
+                for child in self.get_children(node.state):
+                    ck = self.state_key(child["state"])
+                    h_child = self.heuristic_puzzle(child["state"], goal)
+                    changed = [i for i, v in enumerate(child["state"]) if v != node.state[i]]
+
+                    if ck in visited:
+                        dup_label = label_map.get(ck, "?")
+                        steps.append({
+                            "type": "dup",
+                            "state": child["state"],
+                            "label": "Dup",
+                            "changed": changed,
+                            "log": f"  Bỏ qua trùng {child['state']} ({child['icon']}) với {dup_label}, h={h_child}.",
+                        })
+                        continue
+
+                    child_label = self.next_node_label()
+                    label_map[ck] = child_label
+                    visited.add(ck)
+                    child_node = Node(child["state"], node, node.depth + 1, child["move"])
+                    candidates.append((h_child, child_node.depth, child_label, child_node, changed))
+
+                    steps.append({
+                        "type": "gen",
+                        "state": child["state"],
+                        "label": f"{child_label} h={h_child}",
+                        "changed": changed,
+                        "log": f"  Sinh ứng viên {child_label} {child['state']} ({child['icon']}) h={h_child}.",
+                    })
+
+                    if ck == goal_key:
+                        path = self.get_path(child_node)
+                        steps.append({
+                            "type": "goal",
+                            "state": child["state"],
+                            "label": child_label + " = GOAL!",
+                            "changed": changed,
+                            "path": path,
+                            "log": f"✓ Local Beam Search sinh ra GOAL = {child_label}. Độ sâu: {child_node.depth}.",
+                        })
+                        return steps
+
+            if not candidates:
+                steps.append({
+                    "type": "fail",
+                    "log": "✗ Local Beam Search dừng: không còn ứng viên mới để mở rộng.",
+                })
+                return steps
+
+            candidates.sort(key=lambda item: (item[0], item[1]))
+            chosen = candidates[:BEAM_WIDTH]
+            beam = [child_node for _, _, _, child_node, _ in chosen]
+            chosen_info = ", ".join(f"{label}/h={h}" for h, _, label, _, _ in chosen)
+            best_h, _, best_label, best_node, best_changed = chosen[0]
+
+            steps.append({
+                "type": "expand",
+                "state": best_node.state,
+                "label": f"Beam: {chosen_info}",
+                "changed": best_changed,
+                "log": f"  Chọn {len(beam)} node tốt nhất cho beam kế tiếp: {chosen_info}.",
+            })
+
+            if expanded >= MAX_NODES_IDS:
+                steps.append({
+                    "type": "fail",
+                    "log": f"✗ Local Beam Search vượt giới hạn {MAX_NODES_IDS} node.",
+                })
+                return steps
+
+        steps.append({
+            "type": "fail",
+            "log": f"✗ Local Beam Search vượt giới hạn {MAX_BEAM_ITERS} vòng lặp.",
+        })
+        return steps
+
    
-    # CONTROL
 
     def select_algo(self, name):
         if self.is_auto_running:
@@ -835,12 +1726,20 @@ class PuzzleApp:
                 btn.config(bg=self.tile_bg)
 
         names = {
-            "bfs":   "BFS - Late Goal Test",
-            "bfs-e": "BFS - Early Goal Test",
-            "dfs":   "DFS - Late Goal Test",
-            "dfs-e": "DFS - Early Goal Test",
-            "ids":   "IDS - Late Goal Test",
-            "ids-e": "IDS - Early Goal Test",
+            "bfs":         "BFS - Late Goal Test",
+            "bfs-e":       "BFS - Early Goal Test",
+            "dfs":         "DFS - Late Goal Test",
+            "dfs-e":       "DFS - Early Goal Test",
+            "ids":         "IDS - Late Goal Test",
+            "ids-e":       "IDS - Early Goal Test",
+            "ucs":         "UCS - Uniform Cost Search",
+            "astar":       "A* Search",
+            "greedy":      "Greedy Best-First Search",
+            "idastar":     "IDA* Search",
+            "hc_simple":   "HC - Leo dốc đơn giản",
+            "hc_random":   "HC - Leo dốc ngẫu nhiên",
+            "hc_steepest": "HC - Dốc nhất (Steepest-Ascent)",
+            "local_beam":  "Local Beam Search",
         }
         self.vis_title.config(text=names[name].upper())
         self.btn_auto.config(state="normal")
