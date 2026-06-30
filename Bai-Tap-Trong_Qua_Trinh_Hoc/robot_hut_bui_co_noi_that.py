@@ -91,7 +91,7 @@ steps = 30
 print("=== Lưới ban đầu ===")
 print_grid(grid, x, y)
 
-# ── Vòng lặp mô phỏng ────────────────────────────────────
+# ── Vòng lặp mô phỏng ───────────────────────────────────
 for step in range(steps):
     print(f"--- Bước {step + 1} ---")
 
