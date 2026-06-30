@@ -104,6 +104,7 @@ Các bài làm trên lớp, bài tập về nhà và bản nháp trước khi ho
 | `simulated-annealing.py` | Bản 8-puzzle Simulated Annealing độc lập (giao diện riêng) |
 | `giao-dien-may-hut-bui.py` | Bản giao diện máy hút bụi trước đó |
 | `giao-dien-thuat-toan.py` | Bản giao diện 8-puzzle trước đó |
+| `backtracking.py` | Tô màu bản đồ các phường ở TpHCM |
 
 ---
 
