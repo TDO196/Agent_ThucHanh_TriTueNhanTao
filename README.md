@@ -5,7 +5,8 @@
 Mỗi bài toán là một chương trình độc lập, có **giao diện đồ hoạ**, **chạy từng bước hoặc tự động**, kèm **log diễn giải** để thấy rõ cách thuật toán hoạt động. Khởi đầu của môn học là *mô hình phản xạ đơn giản cho máy hút bụi*, sau đó mở rộng dần sang các nhóm thuật toán tìm kiếm khác.
 
 ---
-
+Họ & Tên: Trần Hữu Thành Đô
+---
 ## Mục lục
 - [Cấu trúc thư mục](#cấu-trúc-thư-mục)
 - [Các bài tập chính](#các-bài-tập-chính)
